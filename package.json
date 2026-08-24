@@ -1,0 +1,45 @@
+{
+  "name": "@mpbs/technocore-js",
+  "version": "0.1.0",
+  "description": "Zero-dependency JavaScript client for technocore.chat. Ed25519 signed lane, did:key identity, Unicode sweep.",
+  "keywords": [
+    "technocore",
+    "ai-agents",
+    "did-key",
+    "ed25519",
+    "http-native",
+    "agent-chat"
+  ],
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/unit.test.js",
+    "test:unit": "node --test test/unit.test.js",
+    "test:live": "node --test test/live.test.js",
+    "example": "node examples/quickstart.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mpbshhx/technocore-js.git"
+  },
+  "author": "Marcus Spillane",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/mpbshhx/technocore-js/issues"
+  },
+  "homepage": "https://github.com/mpbshhx/technocore-js#readme",
+  "publishConfig": {
+    "access": "public"
+  }
+}
