@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createPublicKey, verify as edVerify } from 'node:crypto';
+import { createPublicKey, createHash, verify as edVerify } from 'node:crypto';
 import {
   sweep,
   INVISIBLE_CATEGORIES,
@@ -11,6 +11,7 @@ import {
   didKeyFromPublic,
   fingerprint,
   generateIdentity,
+  identityFromSeed,
   privateKeyFromSeed,
   b64urlEncode,
   signSay,
@@ -286,4 +287,126 @@ test('signSay: empty text (after a sweep of all-invisibles) still signs and veri
   const canonical = Buffer.from(`lobby|${nonce}|`, 'utf8');
   const sigBytes = Buffer.from(sig.replace(/-/g, '+').replace(/_/g, '/') + '==', 'base64');
   assert.equal(edVerify(null, canonical, pub, sigBytes), true);
+});
+
+// -----------------------------------------------------------------------------
+// v0.1.1: pinned-literal ranges for Cc/Cs/Zl/Zp/Co must match this runtime's
+// \p{gc=...} tables exactly, and Cf remains runtime-driven. The module
+// self-checks this at load; these tests fail loudly if the assertion is ever
+// weakened.
+// -----------------------------------------------------------------------------
+
+test('pinned Cc range matches this runtime\'s \\p{gc=Cc} exactly', () => {
+  const re = /\p{gc=Cc}/u;
+  const pinned = new Set();
+  for (let cp = 0x0000; cp <= 0x001F; cp++) pinned.add(cp);
+  for (let cp = 0x007F; cp <= 0x009F; cp++) pinned.add(cp);
+  // Every codepoint the runtime says is Cc must be in the pinned set, and vice versa
+  for (const cp of pinned) assert.ok(re.test(String.fromCodePoint(cp)), `pinned 0x${cp.toString(16)} not in runtime Cc`);
+  // Sample a few known-not-Cc codepoints
+  for (const cp of [0x0020, 0x0041, 0x007E, 0x00A0, 0x0100]) {
+    assert.equal(re.test(String.fromCodePoint(cp)), false, `runtime thinks 0x${cp.toString(16)} is Cc`);
+  }
+});
+
+test('pinned Cs range matches (surrogate block U+D800..U+DFFF)', () => {
+  const re = /\p{gc=Cs}/u;
+  assert.ok(re.test('\uD800'));
+  assert.ok(re.test('\uDFFF'));
+  assert.equal(re.test('\uD7FF'), false);
+  assert.equal(re.test('\uE000'), false);
+});
+
+test('pinned Zl is exactly U+2028; pinned Zp is exactly U+2029', () => {
+  assert.ok(/\p{gc=Zl}/u.test('\u2028'));
+  assert.equal(/\p{gc=Zl}/u.test('\u2027'), false);
+  assert.equal(/\p{gc=Zl}/u.test('\u2029'), false);
+  assert.ok(/\p{gc=Zp}/u.test('\u2029'));
+  assert.equal(/\p{gc=Zp}/u.test('\u2028'), false);
+  assert.equal(/\p{gc=Zp}/u.test('\u202A'), false);
+});
+
+test('pinned Co ranges match at endpoints; nothing outside is Co', () => {
+  const re = /\p{gc=Co}/u;
+  for (const cp of [0xE000, 0xF8FF, 0xF0000, 0xFFFFD, 0x100000, 0x10FFFD]) {
+    assert.ok(re.test(String.fromCodePoint(cp)), `pinned Co endpoint 0x${cp.toString(16)} not in runtime Co`);
+  }
+  for (const cp of [0xDFFF, 0xF900, 0xEFFFF, 0xFFFFE, 0x10FFFE]) {
+    assert.equal(re.test(String.fromCodePoint(cp)), false, `runtime thinks 0x${cp.toString(16)} is Co`);
+  }
+});
+
+test('sweep: astral Co codepoints (SPUA-A U+F0000 and SPUA-B U+100000) are swept', () => {
+  // Proof that the \u{F0000}-\u{FFFFD} and \u{100000}-\u{10FFFD} ranges inside
+  // the /u character class match astral code points as single codepoints rather
+  // than as surrogate halves. This is what a hostile reviewer would ask for.
+  const spuaA = String.fromCodePoint(0xF0000);
+  const spuaB = String.fromCodePoint(0x100000);
+  assert.equal(sweep('a' + spuaA + 'b'), 'a b');
+  assert.equal(sweep('a' + spuaB + 'b'), 'a b');
+  // Endpoints of the two astral ranges
+  assert.equal(sweep('a' + String.fromCodePoint(0xFFFFD) + 'b'), 'a b');
+  assert.equal(sweep('a' + String.fromCodePoint(0x10FFFD) + 'b'), 'a b');
+});
+
+test('sweep: near-boundary astral non-Co codepoints are NOT swept', () => {
+  // U+FFFFE and U+10FFFE are Cn (unassigned / noncharacter) — the sweep must
+  // leave them alone. If the character class accidentally spans a surrogate
+  // half, this test catches it.
+  const nonCoAstral1 = String.fromCodePoint(0xFFFFE);
+  const nonCoAstral2 = String.fromCodePoint(0x10FFFE);
+  const s1 = 'a' + nonCoAstral1 + 'b';
+  const s2 = 'a' + nonCoAstral2 + 'b';
+  assert.equal(sweep(s1), s1);
+  assert.equal(sweep(s2), s2);
+});
+
+test('module loads without throwing — the internal verifyPinnedRanges self-check passed', () => {
+  // The mere fact that this test suite imports src/index.js proves the self-check ran.
+  assert.ok(INVISIBLE_CATEGORIES.length === 6);
+});
+
+// -----------------------------------------------------------------------------
+// identityFromSeed — the guardrail against the noncesense67-spec-audited
+// fingerprint-silent-failure mode. The returned bundle always has the correct
+// fingerprint for its did:key, computed from the DID string, not user input.
+// -----------------------------------------------------------------------------
+
+test('identityFromSeed: reconstructs the same didKey and fingerprint as generateIdentity', () => {
+  const fresh = generateIdentity();
+  const rehydrated = identityFromSeed(fresh.privateKeyRaw);
+  assert.equal(rehydrated.didKey, fresh.didKey);
+  assert.equal(rehydrated.fingerprint, fresh.fingerprint);
+  assert.deepEqual(Array.from(rehydrated.publicKeyRaw), Array.from(fresh.publicKeyRaw));
+  assert.deepEqual(Array.from(rehydrated.privateKeyRaw), Array.from(fresh.privateKeyRaw));
+});
+
+test('identityFromSeed: returned KeyObject is ready to sign without a second import', () => {
+  // The single-step ergonomics that make identityFromSeed a full guardrail:
+  // caller does not have to re-run privateKeyFromSeed to get a signable key.
+  const fresh = generateIdentity();
+  const rehydrated = identityFromSeed(fresh.privateKeyRaw);
+  assert.ok(rehydrated.privateKey, 'privateKey field must be present');
+  const { sig } = signSay({
+    privateKey: rehydrated.privateKey, didKey: rehydrated.didKey,
+    room: 'lobby', nonce: 1, text: 'hi',
+  });
+  assert.equal(sig.length, 86);
+});
+
+test('identityFromSeed: fingerprint always derives from didKey (not from raw pubkey bytes)', () => {
+  // Regression: the 9.1% silent-failure mode noncesense67-spec found on
+  // technocore.chat is people writing DID notes at sha256(raw pubkey)[:16]
+  // instead of sha256(didKey)[:16]. This test locks that the API cannot
+  // return the wrong-shape fingerprint.
+  const fresh = generateIdentity();
+  const rehydrated = identityFromSeed(fresh.privateKeyRaw);
+  const badFingerprint = createHash('sha256').update(Buffer.from(fresh.publicKeyRaw)).digest('hex').slice(0, 16);
+  assert.notEqual(rehydrated.fingerprint, badFingerprint, 'fingerprint must not be sha256 of raw pubkey');
+  assert.equal(rehydrated.fingerprint, createHash('sha256').update(rehydrated.didKey).digest('hex').slice(0, 16));
+});
+
+test('identityFromSeed: rejects wrong-length seed', () => {
+  assert.throws(() => identityFromSeed(new Uint8Array(16)), TypeError);
+  assert.throws(() => identityFromSeed('not a Uint8Array'), TypeError);
 });

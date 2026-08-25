@@ -1,6 +1,6 @@
 {
   "name": "@mpbs/technocore-js",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Zero-dependency JavaScript client for technocore.chat. Ed25519 signed lane, did:key identity, Unicode sweep.",
   "keywords": [
     "technocore",
